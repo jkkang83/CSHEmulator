@@ -18,7 +18,9 @@ namespace CSHServer
     {
         public Network Network = new Network();
         public int RunNum = 1;
+
         private System.Windows.Forms.Timer _netTimer;
+
         private void InitNetworkLamp()
         {
             _netTimer = new System.Windows.Forms.Timer();
@@ -42,83 +44,87 @@ namespace CSHServer
             };
             _netTimer.Start();
         }
+
         public Form1()
         {
             InitializeComponent();
 
-            // 상태등 타이머 방식
+            // 상태등 타이머
             InitNetworkLamp();
 
-            // 서버 이벤트 먼저 연결
-            Network.RecieveEvened += Network_RecieveEvened;
-            Network.LogEvented += Network_LogEvened;
+            // 서버 이벤트 먼저 연결 (패치된 이벤트명)
+            Network.FrameReceived += Network_FrameReceived;
+            Network.LogEmitted += Network_LogEmitted;
 
             // 포트 텍스트 준비 시점이 애매하면 Load에서 StartServer 호출을 권장
-            int port;
-            if (!int.TryParse(ServerPort.Text, out port)) port = 5000; // 기본값
+            if (!int.TryParse(ServerPort.Text, out var _))
+                ServerPort.Text = "5000";
         }
-        private void Network_LogEvened(object sender, string e)
+
+        private void Network_LogEmitted(object sender, string e)
         {
-            AddViewLog(string.Format("{0}\r\n", e));
+            AddViewLog($"{e}");
         }
+
         const int MaxLogChars = 200_000; // 필요에 맞게 조정
 
         public void AddViewLog(string lstr)
         {
-            Action write = () =>
+            void write()
             {
                 var ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
                 if (txtLog.TextLength > MaxLogChars) txtLog.Clear();
-                txtLog.AppendText($"{ts}, {lstr}");
+                txtLog.AppendText($"{ts}, {lstr}{(lstr.EndsWith("\r\n") ? "" : "\r\n")}");
                 txtLog.SelectionStart = txtLog.TextLength;
                 txtLog.ScrollToCaret();
-            };
+            }
 
             if (InvokeRequired) BeginInvoke((MethodInvoker)(() => write()));
             else write();
         }
+
         public void ClearAllLog()
         {
             if (InvokeRequired)
             {
-                BeginInvoke((MethodInvoker)delegate
-                {
-                    txtLog.Text = "";
-                });
+                BeginInvoke((MethodInvoker)(() => txtLog.Text = ""));
             }
             else
             {
                 txtLog.Text = "";
             }
         }
+
         // 안전 파싱: "CMD@arg1@arg2@...@\r\n" → string[]
         private string[] ParseFrame(byte[] raw)
         {
             var text = Encoding.ASCII.GetString(raw).TrimEnd('\r', '\n');
-            if (string.IsNullOrWhiteSpace(text)) return new string[0];
+            if (string.IsNullOrWhiteSpace(text)) return Array.Empty<string>();
             return text.Split('@'); // 빈 토큰 허용
         }
+
         // UI 호출 래퍼
         private void UI(Action a)
         {
             if (InvokeRequired) BeginInvoke(a);
             else a();
         }
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
 
-            int port;
-            if (!int.TryParse(ServerPort.Text, out port)) port = 5000;
+            int port = 5000;
+            int.TryParse(ServerPort.Text, out port);
 
             try
             {
                 Network.StartServer(port);
-                AddViewLog($"Server Listen Start (Port: {port})\r\n");
+                AddViewLog($"Server Listen Start (Port: {port})");
             }
             catch (Exception ex)
             {
-                AddViewLog("[ERR] StartServer: " + ex.Message + "\r\n");
+                AddViewLog("[ERR] StartServer: " + ex.Message);
             }
         }
 
@@ -134,14 +140,15 @@ namespace CSHServer
                     _netTimer = null;
                 }
 
-                // 이벤트 해제(후행 콜백 방지)
-                Network.RecieveEvened -= Network_RecieveEvened;
-                Network.LogEvented -= Network_LogEvened;
+                // 이벤트 해제(후행 콜백 방지) — 패치된 이벤트명
+                Network.FrameReceived -= Network_FrameReceived;
+                Network.LogEmitted -= Network_LogEmitted;
 
                 Network.StopServer();
             }
             catch { }
         }
+
         public class sSaveResultBin
         {
             public Int64 sTime;
@@ -157,15 +164,14 @@ namespace CSHServer
             public double[] TY;
             public double[] TZ;
         }
+
         public byte[] MakeSaveResult(int framCnt)
         {
-
             int structCnt = 44;
-
             byte[] dataBuf = new byte[structCnt + framCnt * 8 * 6];
 
-            double umscale = 5.5 / 0.30;                           //  rad to min
-            double minscale = 180 / Math.PI * 60;                           //  rad to min
+            double umscale = 5.5 / 0.30;
+            double minscale = 180 / Math.PI * 60;
             int i = 0;
 
             sSaveResultBin sResult = new sSaveResultBin();
@@ -175,7 +181,6 @@ namespace CSHServer
             DateTime startDateTime = DateTime.Now;
             DateTimeOffset datetimeOffset = new DateTimeOffset(startDateTime);
             long unixTime = datetimeOffset.ToUnixTimeSeconds();
-            //sResult.sTime = startDateTime.ToBinary();
             sResult.sTime = unixTime;
             data = BitConverter.GetBytes(sResult.sTime);
             Array.Copy(data, 0, dataBuf, curCount, data.Length);
@@ -266,50 +271,38 @@ namespace CSHServer
                 Array.Copy(data, 0, dataBuf, curCount, data.Length);
                 curCount += data.Length;
             }
-            StreamWriter wr = null;
-            wr = new StreamWriter(sLotDir);
-            wr.WriteLine("X,Y,Z,TX,TY,TZ");
-            for (i = 0; i < framCnt; i++)
+
+            using (var wr = new StreamWriter(sLotDir))
             {
-                wr.WriteLine(string.Format("{0:0.00},{1:0.00},{2:0.00},{3:0.00},{4:0.00},{5:0.00}", sResult.X[i], sResult.Y[i], sResult.Z[i], sResult.TX[i], sResult.TY[i], sResult.TZ[i]));
+                wr.WriteLine("X,Y,Z,TX,TY,TZ");
+                for (i = 0; i < framCnt; i++)
+                    wr.WriteLine(string.Format("{0:0.00},{1:0.00},{2:0.00},{3:0.00},{4:0.00},{5:0.00}",
+                        sResult.X[i], sResult.Y[i], sResult.Z[i], sResult.TX[i], sResult.TY[i], sResult.TZ[i]));
             }
-            wr.Close();
+
             return dataBuf;
         }
+
         public byte[] MakeMarkShift()
         {
             byte[] dataBuf = new byte[8 * 6];
             int curCount = 0;
-            byte[] data;
-            data = BitConverter.GetBytes(1.1);
-            Array.Copy(data, 0, dataBuf, curCount, data.Length);
-            curCount += data.Length;
 
-            data = BitConverter.GetBytes(2.2);
-            Array.Copy(data, 0, dataBuf, curCount, data.Length);
-            curCount += data.Length;
+            void put(double v)
+            {
+                var data = BitConverter.GetBytes(v);
+                Array.Copy(data, 0, dataBuf, curCount, data.Length);
+                curCount += data.Length;
+            }
 
-            data = BitConverter.GetBytes(3.3);
-            Array.Copy(data, 0, dataBuf, curCount, data.Length);
-            curCount += data.Length;
-
-            data = BitConverter.GetBytes(4.4);
-            Array.Copy(data, 0, dataBuf, curCount, data.Length);
-            curCount += data.Length;
-
-            data = BitConverter.GetBytes(5.5);
-            Array.Copy(data, 0, dataBuf, curCount, data.Length);
-            curCount += data.Length;
-
-            data = BitConverter.GetBytes(6.6);
-            Array.Copy(data, 0, dataBuf, curCount, data.Length);
-            //curCount += data.Length;
-
+            put(1.1); put(2.2); put(3.3); put(4.4); put(5.5); put(6.6);
             return dataBuf;
         }
-        private void Network_RecieveEvened(object sender, byte[] e)
+
+        // === 패치된 수신 핸들러 (FrameReceivedEventArgs 사용) ===
+        private void Network_FrameReceived(object sender, Network.FrameReceivedEventArgs e)
         {
-            var arry = ParseFrame(e);
+            var arry = ParseFrame(e.Frame);
             if (arry.Length == 0) return;
 
             string cmd = arry[0];
@@ -317,44 +310,34 @@ namespace CSHServer
             switch (cmd)
             {
                 case "P_S":
-                    UI(() => AddViewLog("P_S Recieve\r\n"));
+                    UI(() => AddViewLog("P_S Recieve"));
                     break;
 
                 case "R_S": // Request Inspection
                     {
                         if (arry.Length < 2)
                         {
-                            UI(() => AddViewLog("[WARN] R_S missing arg\r\n"));
+                            UI(() => AddViewLog("[WARN] R_S missing arg"));
                             break;
                         }
-                        int frmCnt;
-                        if (!int.TryParse(arry[1], out frmCnt))
+                        if (!int.TryParse(arry[1], out var frmCnt))
                         {
-                            UI(() => AddViewLog("[WARN] R_S arg parse fail\r\n"));
+                            UI(() => AddViewLog("[WARN] R_S arg parse fail"));
                             break;
                         }
 
-                        UI(() => AddViewLog(string.Format("[{0}] - R_S Recieve, trg :{1}\r\n", RunNum++, frmCnt)));
-                        // TODO: 작업 호출
+                        UI(() => AddViewLog($"[{RunNum++}] - R_S Recieve, trg :{frmCnt}"));
 
                         byte[] sDatabuffer = MakeSaveResult(frmCnt);
+                        var head = Encoding.ASCII.GetBytes($"A_R@{frmCnt}@");
+                        var tail = Encoding.ASCII.GetBytes("@\r\n");
+                        var sendBuf = new byte[head.Length + sDatabuffer.Length + tail.Length];
 
-                        byte[] sCmdBuf = null;
-                        byte[] sRnBuf = null;
-                        byte[] sendBuf = null;
-
-                        sCmdBuf = Encoding.ASCII.GetBytes("A_R@" + frmCnt.ToString() + "@");
-                        sRnBuf = Encoding.ASCII.GetBytes("@\r\n");
-                        sendBuf = new byte[sCmdBuf.Length + sDatabuffer.Length + sRnBuf.Length];
-
-                        Array.Copy(sCmdBuf, 0, sendBuf, 0, sCmdBuf.Length);
-
-                        Array.Copy(sDatabuffer, 0, sendBuf, sCmdBuf.Length, sDatabuffer.Length);
-
-                        Array.Copy(sRnBuf, 0, sendBuf, sCmdBuf.Length + sDatabuffer.Length, sRnBuf.Length);
+                        Array.Copy(head, 0, sendBuf, 0, head.Length);
+                        Array.Copy(sDatabuffer, 0, sendBuf, head.Length, sDatabuffer.Length);
+                        Array.Copy(tail, 0, sendBuf, head.Length + sDatabuffer.Length, tail.Length);
 
                         Network.SendData(sendBuf);
-
                         break;
                     }
 
@@ -362,49 +345,37 @@ namespace CSHServer
                     {
                         if (arry.Length < 2)
                         {
-                            UI(() => AddViewLog("[WARN] R_C missing arg\r\n"));
+                            UI(() => AddViewLog("[WARN] R_C missing arg"));
                             break;
                         }
-                        int frmCnt;
-                        if (!int.TryParse(arry[1], out frmCnt))
+                        if (!int.TryParse(arry[1], out var frmCnt))
                         {
-                            UI(() => AddViewLog("[WARN] R_C arg parse fail\r\n"));
+                            UI(() => AddViewLog("[WARN] R_C arg parse fail"));
                             break;
                         }
 
                         Thread.Sleep(1);
-                        UI(() => AddViewLog(string.Format("[{0}] - R_C Recieve, trg :{1}\r\n", RunNum++, frmCnt)));
-                        // TODO: 연속 검사
+                        UI(() => AddViewLog($"[{RunNum++}] - R_C Recieve, trg :{frmCnt}"));
 
                         byte[] sDatabuffer = MakeSaveResult(frmCnt);
+                        var head = Encoding.ASCII.GetBytes($"A_R@{frmCnt}@");
+                        var tail = Encoding.ASCII.GetBytes("@\r\n");
+                        var sendBuf = new byte[head.Length + sDatabuffer.Length + tail.Length];
 
-                        byte[] sCmdBuf = null;
-                        byte[] sRnBuf = null;
-                        byte[] sendBuf = null;
-
-                        sCmdBuf = Encoding.ASCII.GetBytes("A_R@" + frmCnt.ToString() + "@");
-                        sRnBuf = Encoding.ASCII.GetBytes("@\r\n");
-                        sendBuf = new byte[sCmdBuf.Length + sDatabuffer.Length + sRnBuf.Length];
-
-                        Array.Copy(sCmdBuf, 0, sendBuf, 0, sCmdBuf.Length);
-
-                        Array.Copy(sDatabuffer, 0, sendBuf, sCmdBuf.Length, sDatabuffer.Length);
-
-                        Array.Copy(sRnBuf, 0, sendBuf, sCmdBuf.Length + sDatabuffer.Length, sRnBuf.Length);
+                        Array.Copy(head, 0, sendBuf, 0, head.Length);
+                        Array.Copy(sDatabuffer, 0, sendBuf, head.Length, sDatabuffer.Length);
+                        Array.Copy(tail, 0, sendBuf, head.Length + sDatabuffer.Length, tail.Length);
 
                         Network.SendData(sendBuf);
-
                         break;
                     }
 
                 case "D_S": // Detect Shift Length -> A_D@<len>@<data>@\r\n
                     {
-                        UI(() => AddViewLog("D_S Recieve==\r\n"));
+                        UI(() => AddViewLog("D_S Recieve=="));
 
-                        // 예시: 6바이트 더미 데이터
                         byte[] data = MakeMarkShift();
-
-                        var head = Encoding.ASCII.GetBytes("A_D@" + data.Length.ToString() + "@");
+                        var head = Encoding.ASCII.GetBytes("A_D@6@");
                         var tail = Encoding.ASCII.GetBytes("@\r\n");
                         var sendBuf = new byte[head.Length + data.Length + tail.Length];
 
@@ -412,7 +383,7 @@ namespace CSHServer
                         Array.Copy(data, 0, sendBuf, head.Length, data.Length);
                         Array.Copy(tail, 0, sendBuf, head.Length + data.Length, tail.Length);
 
-                        UI(() => AddViewLog("A_D Send\r\n"));
+                        UI(() => AddViewLog("A_D Send"));
                         Network.SendData(sendBuf);
                         break;
                     }
@@ -424,19 +395,16 @@ namespace CSHServer
                             ClearAllLog();
                             RunNum = 0;
                             byte[] sDatabuffer = Encoding.ASCII.GetBytes("A_M@" + "3" + "@\r\n");
-                            AddViewLog(string.Format("Mark ID : " + "3" + " Send\r\n"));
+                            AddViewLog("Mark ID : 3 Send");
                             Network.SendData(sDatabuffer);
                         });
                         break;
                     }
+
                 case "B_U":
                     {
-                        if (arry.Length >= 2)
-                        {
-                            int val;
-                            if (int.TryParse(arry[1], out val))
-                                UI(() => AddViewLog(val == 0 ? "Base Down\r\n" : "Base Up\r\n"));
-                        }
+                        if (arry.Length >= 2 && int.TryParse(arry[1], out var val))
+                            UI(() => AddViewLog(val == 0 ? "Base Down" : "Base Up"));
                         break;
                     }
 
@@ -445,24 +413,20 @@ namespace CSHServer
                 case "C_L":
                 case "D_L":
                     {
-                        if (arry.Length >= 2)
+                        if (arry.Length >= 2 && int.TryParse(arry[1], out var val))
                         {
-                            int val;
-                            if (int.TryParse(arry[1], out val))
-                            {
-                                string msg =
-                                    cmd == "P_L" ? (val == 0 ? "Pogo Pin Unload\r\n" : "Pogo Pin load\r\n") :
-                                    cmd == "S_L" ? (val == 0 ? "Side Push Unload\r\n" : "Side Push load\r\n") :
-                                    cmd == "C_L" ? (val == 0 ? "Cam Side Push Unload\r\n" : "Cam Side Push load\r\n") :
-                                                   (val == 0 ? "All Dln Unload\r\n" : "All Dln load\r\n");
-                                UI(() => AddViewLog(msg));
-                            }
+                            string msg =
+                                cmd == "P_L" ? (val == 0 ? "Pogo Pin Unload" : "Pogo Pin load") :
+                                cmd == "S_L" ? (val == 0 ? "Side Push Unload" : "Side Push load") :
+                                cmd == "C_L" ? (val == 0 ? "Cam Side Push Unload" : "Cam Side Push load") :
+                                               (val == 0 ? "All Dln Unload" : "All Dln load");
+                            UI(() => AddViewLog(msg));
                         }
                         break;
                     }
 
                 case "A_P":
-                    UI(() => AddViewLog("A_P Recieve,\r\n"));
+                    UI(() => AddViewLog("A_P Recieve,"));
                     break;
 
                 case "A_C":

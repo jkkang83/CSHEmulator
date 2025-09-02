@@ -115,173 +115,183 @@ namespace CSHClient
         }
 
         /// <summary>
-        /// Handle received frames (text or binary) like the server-side pattern.
-        /// Frames include trailing CRLF.
+        /// Handle one complete frame (frame already includes trailing "@\r\n").
+        /// Matches server protocol:
+        ///   - A_D@<count>@<payload>@\r\n   (payload = count * double, LE)
+        ///   - A_R@<framCnt>@<payload>@\r\n (payload = 44B header + 6 arrays * framCnt, LE)
+        ///   - A_M@<id>@\r\n                (ASCII only)
         /// </summary>
         private void Client_RecieveEvened(object sender, byte[] frame)
         {
             UI(() =>
             {
-                // Extract command token (before first '@') or until CRLF for pure text
-                int firstAt = Array.IndexOf(frame, (byte)'@');
+                // Find CRLF once (for fallback ASCII dump)
                 int crlf = -1;
                 for (int i = 0; i < frame.Length - 1; i++)
                 {
                     if (frame[i] == 0x0D && frame[i + 1] == 0x0A) { crlf = i; break; }
                 }
 
-                // Pure text line: "CMD\r\n"
-                if (firstAt < 0 && crlf >= 0)
+                // First '@' separates CMD from the rest
+                int firstAt = Array.IndexOf(frame, (byte)'@');
+                if (firstAt <= 0)
                 {
-                    string sline = Encoding.ASCII.GetString(frame, 0, crlf);
-                    AddViewLog("RX: " + sline + "\r\n");
-                    return;
-                }
-
-                if (firstAt < 0)
-                {
-                    AddViewLog("[WARN] Unknown frame (no '@') len=" + frame.Length + "\r\n");
+                    if (crlf >= 0)
+                    {
+                        string sline = Encoding.ASCII.GetString(frame, 0, crlf);
+                        AddViewLog("RX: " + sline + "\r\n");
+                    }
+                    else
+                    {
+                        AddViewLog("[WARN] Invalid frame (no '@' after CMD)\r\n");
+                    }
                     return;
                 }
 
                 string cmd = Encoding.ASCII.GetString(frame, 0, firstAt);
 
-                // A_D@len@<bytes>@\r\n
+                // ----------------- A_D -----------------
                 if (cmd == "A_D")
                 {
                     int secondAt = Array.IndexOf(frame, (byte)'@', firstAt + 1);
-                    if (secondAt < 0) { AddViewLog("[WARN] A_D incomplete header\r\n"); return; }
+                    if (secondAt < 0) { AddViewLog("[WARN] A_D header incomplete\r\n"); return; }
 
-                    string lenStr = Encoding.ASCII.GetString(frame, firstAt + 1, secondAt - (firstAt + 1));
-                    int dataLen;
-                    if (!int.TryParse(lenStr, out dataLen) || dataLen < 0)
+                    // <count>
+                    string sCount = Encoding.ASCII.GetString(frame, firstAt + 1, secondAt - (firstAt + 1));
+                    if (!int.TryParse(sCount, out int count) || count < 0)
                     {
-                        AddViewLog("[WARN] A_D len parse fail\r\n");
+                        AddViewLog("[WARN] A_D count parse fail\r\n");
                         return;
                     }
 
-                    int dataStart = secondAt + 1;
-                    int tailStart = dataStart + dataLen; // '@' before CRLF
-                    if (frame.Length < tailStart + 3 ||
-                        frame[tailStart] != (byte)'@' || frame[tailStart + 1] != 0x0D || frame[tailStart + 2] != 0x0A)
+                    // Tail '@' is the char right before CRLF
+                    int tailIdx = frame.Length - 3;
+                    if (tailIdx < 0 || frame[tailIdx] != (byte)'@' || frame[tailIdx + 1] != 0x0D || frame[tailIdx + 2] != 0x0A)
                     {
                         AddViewLog("[WARN] A_D tail invalid\r\n");
                         return;
                     }
 
-                    var payload = new byte[dataLen];
-                    Buffer.BlockCopy(frame, dataStart, payload, 0, dataLen);
+                    int dataStart = secondAt + 1;
+                    int payloadLen = tailIdx - dataStart;
+                    if (payloadLen <= 0) { AddViewLog("[WARN] A_D empty payload\r\n"); return; }
 
-                    // Interpret payload as doubles (if multiple of 8)
-                    if (dataLen % 8 != 0)
+                    var payload = new byte[payloadLen];
+                    Buffer.BlockCopy(frame, dataStart, payload, 0, payloadLen);
+
+                    if (payloadLen % 8 != 0)
+                        AddViewLog($"[WARN] A_D payload size({payloadLen}) not multiple of 8\r\n");
+
+                    int actual = payloadLen / 8;
+                    if (actual != count)
+                        AddViewLog($"[WARN] A_D count mismatch header({count}) != actual({actual})\r\n");
+
+                    var values = new double[actual];
+                    for (int i = 0; i < actual; i++)
+                        values[i] = BitConverter.ToDouble(payload, i * 8); // LE
+
+                    AddViewLog($"A_D Receive (count={count}, doubles={actual})\r\n");
+                    if (actual == 6)
                     {
-                        AddViewLog($"[WARN] A_D payload size({dataLen}) is not multiple of 8\r\n");
-                    }
-
-                    int count = dataLen / 8;
-                    double[] values = new double[count];
-                    for (int i = 0; i < count; i++)
-                        values[i] = BitConverter.ToDouble(payload, i * 8);
-
-                    AddViewLog($"A_D Recieve (len={dataLen}, doubles={count})\r\n");
-                    if (count == 6)
-                    {
-                        AddViewLog(
-                            $"  X={values[0]:0.000}, Y={values[1]:0.000}, Z={values[2]:0.000}, " +
-                            $"TX={values[3]:0.000}, TY={values[4]:0.000}, TZ={values[5]:0.000}\r\n"
-                        );
+                        AddViewLog($"  X={values[0]:0.000}, Y={values[1]:0.000}, Z={values[2]:0.000}, " +
+                                   $"TX={values[3]:0.000}, TY={values[4]:0.000}, TZ={values[5]:0.000}\r\n");
                     }
                     else
                     {
-                        for (int i = 0; i < count; i++)
+                        for (int i = 0; i < actual; i++)
                             AddViewLog($"  [{i}] {values[i]:0.000}\r\n");
                     }
                     return;
                 }
 
-                // A_R@frmCnt@<bytes>@\r\n  (bytes len = 44 + frmCnt*8*6)
-                // Header (44B): Int64 sTime, int frameCount, double fps, ledLeft, ledRight, testTime
+                // ----------------- A_R -----------------
                 if (cmd == "A_R")
                 {
                     int secondAt = Array.IndexOf(frame, (byte)'@', firstAt + 1);
-                    if (secondAt < 0) { AddViewLog("[WARN] A_R incomplete header\r\n"); return; }
+                    if (secondAt < 0) { AddViewLog("[WARN] A_R header incomplete\r\n"); return; }
 
                     string cntStr = Encoding.ASCII.GetString(frame, firstAt + 1, secondAt - (firstAt + 1));
-                    int frmCnt;
-                    if (!int.TryParse(cntStr, out frmCnt) || frmCnt < 0)
+                    if (!int.TryParse(cntStr, out int frmCnt) || frmCnt < 0)
                     {
-                        AddViewLog("[WARN] A_R frmCnt parse fail\r\n");
+                        AddViewLog("[WARN] A_R framCnt parse fail\r\n");
                         return;
                     }
 
-                    int dataLen = 44 + frmCnt * 8 * 6;
-                    int dataStart = secondAt + 1;
-                    int tailStart = dataStart + dataLen;
-                    if (frame.Length < tailStart + 3 ||
-                        frame[tailStart] != (byte)'@' || frame[tailStart + 1] != 0x0D || frame[tailStart + 2] != 0x0A)
+                    int tailIdx = frame.Length - 3;
+                    if (tailIdx < 0 || frame[tailIdx] != (byte)'@' || frame[tailIdx + 1] != 0x0D || frame[tailIdx + 2] != 0x0A)
                     {
                         AddViewLog("[WARN] A_R tail invalid\r\n");
                         return;
                     }
 
-                    var payload = new byte[dataLen];
-                    Buffer.BlockCopy(frame, dataStart, payload, 0, dataLen);
+                    int dataStart = secondAt + 1;
+                    int payloadLen = tailIdx - dataStart;
+                    if (payloadLen < 44) { AddViewLog("[WARN] A_R payload too small\r\n"); return; }
+
+                    var p = new byte[payloadLen];
+                    Buffer.BlockCopy(frame, dataStart, p, 0, payloadLen);
 
                     int off = 0;
-                    long sTime = ReadInt64LE(payload, ref off);
-                    int frameCnt = ReadInt32LE(payload, ref off);
-                    double fps = ReadDoubleLE(payload, ref off);
-                    double ledL = ReadDoubleLE(payload, ref off);
-                    double ledR = ReadDoubleLE(payload, ref off);
-                    double ttime = ReadDoubleLE(payload, ref off);
+                    long sTime = ReadInt64LE(p, ref off);
+                    int frameCt = ReadInt32LE(p, ref off);
+                    double fps = ReadDoubleLE(p, ref off);
+                    double ledL = ReadDoubleLE(p, ref off);
+                    double ledR = ReadDoubleLE(p, ref off);
+                    double ttime = ReadDoubleLE(p, ref off);
 
-                    Func<int, double[]> ReadDoubles = (n) =>
+                    if (frameCt != frmCnt)
+                        AddViewLog($"[WARN] A_R frameCount mismatch header({frmCnt}) != payload({frameCt})\r\n");
+
+                    double[] ReadArr(int n)
                     {
                         var arr = new double[n];
-                        for (int i = 0; i < n; i++) arr[i] = ReadDoubleLE(payload, ref off);
+                        for (int i = 0; i < n; i++) arr[i] = ReadDoubleLE(p, ref off);
                         return arr;
-                    };
+                    }
 
-                    var X = ReadDoubles(frmCnt);
-                    var Y = ReadDoubles(frmCnt);
-                    var Z = ReadDoubles(frmCnt);
-                    var TX = ReadDoubles(frmCnt);
-                    var TY = ReadDoubles(frmCnt);
-                    var TZ = ReadDoubles(frmCnt);
+                    var X = ReadArr(frmCnt);
+                    var Y = ReadArr(frmCnt);
+                    var Z = ReadArr(frmCnt);
+                    var TX = ReadArr(frmCnt);
+                    var TY = ReadArr(frmCnt);
+                    var TZ = ReadArr(frmCnt);
 
-                    AddViewLog(
-                        $"A_R Recieve (frmCnt={frmCnt}, bytes={dataLen})  " +
-                        $"fps={fps:0.##}, LED(L/R)={ledL:0.##}/{ledR:0.##}, testTime={ttime}\r\n"
-                    );
-
-                    // Dump all array values
+                    AddViewLog($"A_R Receive (frames={frmCnt}, fps={fps:0.##}, test={ttime:0.##}s)\r\n");
                     for (int i = 0; i < frmCnt; i++)
                     {
-                        AddViewLog(
-                            $"  [{i}] X={X[i]:0.00}, Y={Y[i]:0.00}, Z={Z[i]:0.00}, " +
-                            $"TX={TX[i]:0.00}, TY={TY[i]:0.00}, TZ={TZ[i]:0.00}\r\n"
-                        );
+                        AddViewLog($"  [{i}] X={X[i]:0.00}, Y={Y[i]:0.00}, Z={Z[i]:0.00}, " +
+                                   $"TX={TX[i]:0.00}, TY={TY[i]:0.00}, TZ={TZ[i]:0.00}\r\n");
                     }
                     return;
                 }
 
-                // A_M@<id>@\r\n
+                // ----------------- A_M -----------------
                 if (cmd == "A_M")
                 {
                     int secondAt = Array.IndexOf(frame, (byte)'@', firstAt + 1);
                     if (secondAt < 0) { AddViewLog("[WARN] A_M missing 2nd '@'\r\n"); return; }
 
                     string markId = Encoding.ASCII.GetString(frame, firstAt + 1, secondAt - (firstAt + 1));
-                    AddViewLog($"A_M Recieve (Mark ID = {markId})\r\n");
+                    AddViewLog($"A_M Receive (Mark ID = {markId})\r\n");
                     return;
                 }
 
-                // Fallback: print the raw ASCII line
-                string line = (crlf >= 0) ? Encoding.ASCII.GetString(frame, 0, crlf)
-                                          : Encoding.ASCII.GetString(frame);
-                AddViewLog("RX: " + line.TrimEnd('\r', '\n') + "\r\n");
+                // ----------------- Fallback ASCII -----------------
+                if (crlf >= 0)
+                {
+                    string line = Encoding.ASCII.GetString(frame, 0, crlf);
+                    AddViewLog("RX: " + line + "\r\n");
+                }
+                else
+                {
+                    AddViewLog("[WARN] Unknown frame (no CRLF)\r\n");
+                }
             });
         }
+
+
+
+
 
         private static int ReadInt32LE(byte[] buf, ref int offset)
         {

@@ -129,7 +129,7 @@
             this.Controls.Add(this.ServerPort);
             this.Controls.Add(this.label11);
             this.Name = "Form1";
-            this.Text = "CSHEmul_090201";
+            this.Text = "CSHEmul_090３01";
             this.ResumeLayout(false);
             this.PerformLayout();
 

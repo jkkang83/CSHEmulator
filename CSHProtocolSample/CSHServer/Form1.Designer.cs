@@ -75,12 +75,12 @@
             this.txtLog.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.txtLog.Font = new System.Drawing.Font("맑은 고딕", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.txtLog.ForeColor = System.Drawing.Color.LemonChiffon;
-            this.txtLog.Location = new System.Drawing.Point(178, 57);
+            this.txtLog.Location = new System.Drawing.Point(12, 57);
             this.txtLog.Multiline = true;
             this.txtLog.Name = "txtLog";
             this.txtLog.ReadOnly = true;
             this.txtLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtLog.Size = new System.Drawing.Size(636, 470);
+            this.txtLog.Size = new System.Drawing.Size(802, 470);
             this.txtLog.TabIndex = 192;
             // 
             // txtMsaterNuma
@@ -108,7 +108,7 @@
             // btnClear
             // 
             this.btnClear.Font = new System.Drawing.Font("Arial", 9.75F, System.Drawing.FontStyle.Bold);
-            this.btnClear.Location = new System.Drawing.Point(178, 8);
+            this.btnClear.Location = new System.Drawing.Point(12, 11);
             this.btnClear.Name = "btnClear";
             this.btnClear.Size = new System.Drawing.Size(180, 43);
             this.btnClear.TabIndex = 207;
@@ -129,7 +129,7 @@
             this.Controls.Add(this.ServerPort);
             this.Controls.Add(this.label11);
             this.Name = "Form1";
-            this.Text = "CSHEmul_090３01";
+            this.Text = "CSHServer_Ver. 25090301";
             this.ResumeLayout(false);
             this.PerformLayout();
 

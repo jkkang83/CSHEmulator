@@ -220,7 +220,7 @@
             this.Controls.Add(this.lblNetwork);
             this.Controls.Add(this.txtLog);
             this.Name = "Form1";
-            this.Text = "Form1";
+            this.Text = "CSHClient_Ver. 25090301";
             this.ResumeLayout(false);
             this.PerformLayout();
 

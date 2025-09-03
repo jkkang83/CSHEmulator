@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CSHServer", "CSHServer\CSHS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CSHClient", "CSHClient\CSHClient.csproj", "{6498C34D-0F09-4C1F-A94C-DBF3DD7321E1}"
 EndProject
+Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "SetUpCSHServer", "SetUpCSHServer\SetUpCSHServer.vdproj", "{0FB5BC93-8F1C-47EC-981A-DB10CA07DB15}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,8 +23,13 @@ Global
 		{6498C34D-0F09-4C1F-A94C-DBF3DD7321E1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6498C34D-0F09-4C1F-A94C-DBF3DD7321E1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6498C34D-0F09-4C1F-A94C-DBF3DD7321E1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0FB5BC93-8F1C-47EC-981A-DB10CA07DB15}.Debug|Any CPU.ActiveCfg = Debug
+		{0FB5BC93-8F1C-47EC-981A-DB10CA07DB15}.Release|Any CPU.ActiveCfg = Release
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5D6BB8FF-CA24-4972-AF9C-6738B8D8F4EF}
 	EndGlobalSection
 EndGlobal
